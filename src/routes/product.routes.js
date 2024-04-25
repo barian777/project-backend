@@ -4,7 +4,6 @@ import ProductManager from "../managers/productManager.js";
 const manager = new ProductManager("./ddbb/products.json")
 const routerProducts = express.Router()
 
-//router.use(express.urlencoded({ extended: true }));
 routerProducts.post("/api/products", async (req, res) => {
     try {
       const body = req.body;

@@ -55,7 +55,7 @@ class ProductManager{
         try {
             const products = await this.getProducts(0);
             const productById = products.find(element => element.id === parseInt(id))
-            return productById || `Producto con ${id} innexistente.`
+            return productById || `Producto con ID ${id} innexistente.`
         } catch (error) {
             return `Se produjo un error para encontrar el prodcuto con el id ${id}.`
         }
