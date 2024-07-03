@@ -1,84 +1,82 @@
-import express from "express";
-import ProductManager from "../managers/productManager.js";
+import { Router } from "express";
+import { uploader } from "../uploader.js";
+import ManagerProducts from "../dao/managerProduct.mdb.js"
+import productsModel from "../dao/models/products.model.js"
 
-const manager = new ProductManager("./ddbb/products.json")
-const routerProducts = express.Router()
+const router = Router();
 
-routerProducts.post("/api/products", async (req, res) => {
-    try {
-      const body = req.body;
-      if (
-        req.body.title &&
-        req.body.description &&
-        req.body.code &&
-        req.body.price &&
-        req.body.status &&
-        req.body.stock &&
-        req.body.category &&
-        req.body.thumbnail
-      ) {
-        await manager.addProduct(body);
-        res.status(200).send({ origin: "server1", payload: body });
-      } else {
-        res.status(400).send({origin: "server1", payload: "Por favor complete todos los campos",});
-      }
-    } catch (error) {
-      res.status(500).send({ origin: "server1", payload: "Se produjo un error al subir el producto nuevo." });
+const manager = new ManagerProducts();
+
+router.get('/', async (req, res) => {
+    const limit = isNaN(+req.query.limit) ? 8 : +req.query.limit;
+    const page = isNaN(+req.query.page) ? 1 : +req.query.page;
+    const key = req.query.key || null ;
+    const value = req.query.value || null;
+    const order = req.query.order || 'asc';
+    let sort;
+    if (order === 'desc') {
+        sort = { [key]: -1 };
+    } else {
+        sort = { [key]: 1 };
     }
-  });
 
-routerProducts.get("/api/products", async (req, res) => {
     try {
-        const limit = +req.query.limit || 0;
-        const products = await manager.getProducts(limit);
-        res.status(200).send({origin : "server1", payload : products})
+        const listProducts = await productsModel.paginate({[key]:value},{page:page, limit:limit, sort })
+        res.status(200).send({origin : "serverAtlas", payload : listProducts})
     } catch (error) {
         console.error("Error al intentar obtener los productos:", error);
-        res.status(500).send({origin : "server1", payload : "No se pudo obtener los productos."})
+        res.status(500).send({origin : "serverAtlas", payload : "No se pudo obtener los productos."})
     }
 })
 
-routerProducts.get("/api/products/:pid", async (req, res) => {
+router.get('/:id', async (res,req) => {
+    const id = req.params.id
     try {
-        const product = await manager.getProductById(+req.params.pid);
-        res.status(200).send({origin : "server1", payload : product}) 
+        const productSelect = await manager.getById(id)
+        res.status(200).send({origin : "serverAtlas", payload : productSelect})
     } catch (error) {
-        res.status(404).send({origin : "server1", payload : "Por favor ingrese un ID válido."})
+        console.error("Error al intentar obtener el producto:", error);
+        res.status(500).send({origin : "serverAtlas", payload : "No se pudo obtener el producto."})
     }
 })
 
-routerProducts.put("/api/products/:pid", async (req, res) => {
-    const productId = parseInt(req.params.pid);
-    const { prop, value } = req.body; 
-
+router.post('/', uploader.single('thumbnail'), async (req, res) => {
     try {
-        const updated = await manager.updateProduct(productId, prop, value);
+        const socketServer = req.app.get('socketServer');
+        const newProduct = await manager.add(req.body)
+        res.status(200).send({origin : "serverAtlas", payload : `${newProduct} se cargo con exito.`})
+        socketServer.emit('newProduct', req.body);
+    } catch (error) {
+        console.error("Error al intentar cargar el producto:", error);
+        res.status(500).send({origin : "serverAtlas", payload : "No se pudo cargar el producto."})
+    }
+})
 
-        if (updated) {
-            res.status(200).send({ origin: "server1", payload: "El producto se actualizó con éxito." });
-        } else {
-            res.status(404).send({ origin: "server1", payload: "No se encontró el producto para actualizar." });
-        }
+router.put('/:id', async (req, res) => {
+    try {
+        const filter = { _id: req.params.id };
+        const update = req.body;
+        const options = { new: true };
+        const productUpdated = await manager.update(filter, update, options);
+
+        res.status(200).send({origin : "serverAtlas", payload : `${productUpdated} <br/>Se actualizo exitosamente.`})
+
     } catch (error) {
         console.error("Error al intentar actualizar el producto:", error);
-        res.status(500).send({ origin: "server1", payload: "Se produjo un error al intentar actualizar el producto." });
+        res.status(500).send({origin : "serverAtlas", payload : "No se pudo actualizar el producto."})
     }
-});
+})
 
-routerProducts.delete("/api/products/:pid", async (req, res) => {
+router.delete('/:id', async (req, res) => {
     try {
-        const productId = +req.params.pid;
-        const productDeleted = await manager.deleteProduct(productId);
+        const filter = {_id: req.params.id};
+        const productDelete = await manager.delete(filter)
 
-        if (productDeleted) {
-            res.status(200).send({ origin: "server1", payload: "El producto se eliminó con éxito." });
-        } else {
-            res.status(404).send({ origin: "server1", payload: "No se encontró el producto para eliminar." });
-        }
+        res.status(200).send({origin : "serverAtlas", payload : `El producto ${productDelete} se elimino con exito.`})
     } catch (error) {
-        res.status(500).send({ origin: "server1", payload: "Se produjo un error al intentar eliminar el producto." });
+        console.error("Error al intentar eliminar el producto:", error);
+        res.status(500).send({origin : "serverAtlas", payload : "No se pudo eliminar el producto."})
     }
-});
+})
 
-
-export default routerProducts;
+export default router;
