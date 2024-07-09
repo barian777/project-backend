@@ -2,19 +2,22 @@ import { Router } from 'express';
 import passport from 'passport';
 
 import config from '../config.js';
-import { createHash, isValidPassword, verifyRequiredBody } from '../utils.js';
+import { createHash, isValidPassword, verifyRequiredBody, createToken, verifyToken } from '../utils.js';
 import UsersManager from '../dao/managerUser.mdb.js';
-import initAuthStrategies from '../auth/passport.strategies.js';
+import initAuthStrategies, { passportCall } from '../auth/passport.strategies.js';
 
 const router = Router();
 const manager = new UsersManager();
 initAuthStrategies();
 
-const verifyAdmin = (req, res, next) => {
-    if (req.session.user?.role !== 'admin')
-        return res.status(403).send({ origin: config.SERVER, payload: 'Acceso denegado: permitido unicamente ADMIN' });
 
-    next();
+const verifyAuthorization = role => {
+    return async (req, res, next) => {
+        if (!req.user) return res.status(401).send({ origin: config.SERVER, payload: 'Usuario no autenticado' });
+        if (req.user.role !== role) return res.status(403).send({ origin: config.SERVER, payload: 'Acceso denegado: permitido unicamente ADMIN' });
+        
+        next();
+    }
 }
 
 router.get('/hash/:password', async (req, res) => {
@@ -29,6 +32,7 @@ router.post('/register', verifyRequiredBody(['firstName', 'lastName', 'email', '
         if (!foundUser) {
             const process = await manager.add({ firstName, lastName, email, password: createHash(password)});
             res.status(200).send({ origin: config.SERVER, payload: process });
+            res.redirect('/login');
         } else {
             res.status(400).send({ origin: config.SERVER, payload: 'El email ya se encuentra registrado' });
         }
@@ -60,6 +64,15 @@ router.post('/login', verifyRequiredBody(['email', 'password']), async (req, res
     }
 });
 
+router.post('/jwtlogin', verifyRequiredBody(['email', 'password']), passport.authenticate('login', { failureRedirect: `/login?error=${encodeURI('Usuario o clave no válidos')}`}), async (req, res) => {
+    try {
+        const token = createToken(req.user, '1h');
+        res.cookie(`${config.APP_NAME}_cookie`, token, { maxAge: 60 * 60 * 1000, httpOnly: true });
+        res.status(200).send({ origin: config.SERVER, payload: 'Usuario autenticado' });
+    } catch (err) {
+        res.status(500).send({ origin: config.SERVER, payload: null, error: err.message });
+    }
+});
 
 router.post('/pplogin', verifyRequiredBody(['email', 'password']), passport.authenticate('login', { failureRedirect: `/login?error=${encodeURI('Usuario o clave no válidos')}`}), async (req, res) => {
     try {
@@ -90,7 +103,15 @@ router.get('/ghlogincallback', passport.authenticate('ghlogin', {failureRedirect
     }
 });
 
-router.get('/admin', verifyAdmin, async (req, res) => {
+router.get('/admin', verifyToken, verifyAuthorization('admin'), async (req, res) => {
+    try {
+        res.status(200).send({ origin: config.SERVER, payload: 'Bienvenido ADMIN!' });
+    } catch (err) {
+        res.status(500).send({ origin: config.SERVER, payload: null, error: err.message });
+    }
+});
+
+router.get('/ppadmin', passportCall('jwtlogin'), verifyAuthorization('admin'), async (req, res) => {
     try {
         res.status(200).send({ origin: config.SERVER, payload: 'Bienvenido ADMIN!' });
     } catch (err) {

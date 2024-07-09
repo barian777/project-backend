@@ -1,16 +1,26 @@
 import passport from 'passport';
 import local from 'passport-local';
 import GitHubStrategy from 'passport-github2';
+import jwt from 'passport-jwt';
 
 import config from '../config.js';
 import UsersManager from '../dao/managerUser.mdb.js';
 import { isValidPassword } from '../utils.js';
 
 const localStrategy = local.Strategy;
+const jwtStrategy = jwt.Strategy;
+const jwtExtractor = jwt.ExtractJwt;
 const manager = new UsersManager();
 
+const cookieExtractor = (req) => {
+    let token = null;
+    if (req && req.cookies) token = req.cookies[`${config.APP_NAME}_cookie`];
+    
+    return token;
+}
+
 const initAuthStrategies = () => {
-    // Estrategia local (cotejamos contra nuestra base de datos)
+
     passport.use('login', new localStrategy(
         {passReqToCallback: true, usernameField: 'email'},
         async (req, username, password, done) => {
@@ -29,9 +39,6 @@ const initAuthStrategies = () => {
         }
     ));
 
-    // Crear otra estrategia tipo local para register
-
-    // Estrategia de terceros (autenticamos a través de un servicio externo)
     passport.use('ghlogin', new GitHubStrategy(
         {
             clientID: config.GITHUB_CLIENT_ID,
@@ -40,15 +47,8 @@ const initAuthStrategies = () => {
         },
         async (req, accessToken, refreshToken, profile, done) => {
             try {
-                // Si passport llega hasta acá, es porque la autenticación en Github
-                // ha sido correcta, tendremos un profile disponible
                 const email = profile._json?.email || null;
-                
-                // Necesitamos que en el profile haya un email
                 if (email) {
-                    // Tratamos de ubicar en NUESTRA base de datos un usuario
-                    // con ese email, si no está lo creamos y lo devolvemos,
-                    // si ya existe retornamos directamente esos datos
                     const foundUser = await manager.getOne({ email: email });
 
                     if (!foundUser) {
@@ -74,13 +74,44 @@ const initAuthStrategies = () => {
         }
     ));
 
+    passport.use('jwtlogin', new jwtStrategy(
+        {
+            jwtFromRequest: jwtExtractor.fromExtractors([cookieExtractor]),
+            secretOrKey: config.SECRET
+        },
+        async (jwt_payload, done) => {
+            try {
+                return done(null, jwt_payload);
+            } catch (err) {
+                return done(err);
+            }
+        }
+    ));
+
     passport.serializeUser((user, done) => {
         done(null, user);
     });
         
-    passport.deserializeUser((user, done) => {
-        done(null, user);
+    passport.deserializeUser(async(user, done) => {
+        try {
+            done(null, await manager.getById(user._id));
+        } catch (err) {
+            done(err.message);
+        }
     });
 }
+
+export const passportCall = strategy => {
+    return async (req, res, next) => {
+        passport.authenticate(strategy, { session: false }, function (err, user, info) {
+            if (err) return next(err);
+            // if (!user) return res.status(401).send({ origin: config.SERVER, payload: null, error: info.messages ? info.messages : info.toString() });
+            if (!user) return res.status(401).send({ origin: config.SERVER, payload: null, error: 'Usuario no autenticado' });
+
+            req.user = user;
+            next();
+        })(req, res, next);
+    }
+};
 
 export default initAuthStrategies;

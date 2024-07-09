@@ -1,7 +1,7 @@
 import * as url from "url"
 
 const config = {
-
+    APP_NAME: 'coder_53160_be',
     PORT : 8080,
     SERVER:"atlas_01",
     DIRNAME: url.fileURLToPath(new URL('.', import.meta.url)),
